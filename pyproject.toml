@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools >= 61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "straight-pitch"
+description = "Pitch estimator from STRAIGHT speech analysis tool"
+readme = "README.md"
+keywords = []
+# license = { text = "MIT License" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    'Topic :: Multimedia :: Sound/Audio :: Analysis',
+]
+dynamic = ["version"]
+requires-python = ">=3.8"
+dependencies = ["numpy", "scipy"]
+
+[project.urls]
+Repository = "https://github.com/tikuma-lsuhsc/python-straight-pitch"
+
+[tool.setuptools.dynamic]
+version = { attr = "straight_pitch.__version__" }
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# minversion = "6.0"
+# addopts = "-ra -q"
