@@ -11,10 +11,14 @@ from numbers import Real
 from math import ceil, floor, log2
 import numpy as np
 from scipy import signal as sps
+from scipy.fft import next_fast_len
 
 from .fixpF0VexMltpBG4 import fixpF0VexMltpBG4
 from .f0track5 import f0track5
 from .refineF06 import refineF06
+from .utils import decimate
+
+from matplotlib import pyplot as plt
 
 # def exstraightsource(x,fs,optionalParams=None):
 #   Source information extraction for STRAIGHT
@@ -50,78 +54,71 @@ from .refineF06 import refineF06
 # 	30/April/2005 modification for Matlab v7.0 compatibility
 
 
-def straight_pitch(x: ArrayLike, fs: Real, optionalParams: dict | None = None)->NDArray:
-
-    if fs<=0:
-        raise ValueError(f'{fs=} must be strictly positive.')
-
-    prm = zinitializeParameters()
-    if optionalParams is not None:
-        prm.update(optionalParams)
-
-    #   Initialize default parameters
-    f0floor = prm["F0searchLowerBound"]  # f0floor
-    f0ceil = prm["F0searchUpperBound"]  # f0ceil
-    framem = prm[
-        "F0defaultWindowLength"
-    ]  # default frame length for pitch extraction (ms)
-    f0shiftm = prm["F0frameUpdateInterval"]  # shiftm # F0 calculation interval (ms)
-
-    fftl = 1024  # default FFT length
-
-    framel = framem * fs / 1000
-
-    if fftl < framel:
-        fftl = 2 ^ ceil(log2(framel))
+def straight_pitch(
+    x: ArrayLike, fs: Real, optionalParams: dict | None = None
+) -> NDArray:
 
     x = np.asarray(x)
 
     if x.ndim > 1:
         raise ValueError("x must be a 1D array.")
 
-    nvo = prm["NofChannelsInOctave"]  # nvo=24 # Number of channels in one octave
-    mu = prm["IFWindowStretch"]  # mu=1.2 # window stretch from isometric window
-    imageOn = prm["DisplayPlots"]  # imgi=1 # image display indicator (1: display image)
-    smp = prm[
-        "IFsmoothingLengthRelToFc"
-    ]  #  smp=1 # smoothing length relative to fc (ratio)
-    minsm = prm["IFminimumSmoothingLength"]  #  minm=5 # minimum smoothing length (ms)
-    pcf0 = prm[
-        "IFexponentForNonlinearSum"
-    ]  # pc=0.5 # exponent to represent nonlinear summation
-    nh = prm[
-        "IFnumberOfHarmonicForInitialEstimate"
-    ]  # nc=1 # number of harmonic component to use (1,2,3)
-    fname = prm["note"]  # =' ' # Any text to be printed on the source information plot
+    if fs <= 0:
+        raise ValueError(f"{fs=} must be strictly positive.")
 
+    prm = zinitializeParameters()
+    if optionalParams is not None:
+        prm.update(optionalParams)
+
+    #   Initialize default parameters
+    f0floor = prm["F0searchLowerBound"]
+    f0ceil = prm["F0searchUpperBound"]
+
+    # default frame length for pitch extraction (ms)
+    framem = prm["F0defaultWindowLength"]
+
+    fftl = 1024  # default FFT length
+    framel = round(framem * fs / 1000)
+
+    if fftl < framel:
+        fftl = next_fast_len(framel)
+
+    # nvo # Number of channels in one octave
+    nvo = prm["NofChannelsInOctave"]
     nvc = ceil(log2(f0ceil / f0floor) * nvo)  # number of channels
 
-    # paramaters for F0 refinement
-    fftlf0r = prm["refineFftLength"]  # fftlf0r=1024 # FFT length for F0 refinement
-    tstretch = prm[
-        "refineTimeStretchingFactor"
-    ]  # tstretch=1.1 # time window stretching factor
-    nhmx = prm[
-        "refineNumberofHarmonicComponent"
-    ]  # nhmx=3 # number of harmonic components for F0 refinement
-    iPeriodicityInterval = prm[
-        "periodicityFrameUpdateInterval"
-    ]  # frame update interval for periodicity index (ms)
-
     # ---- F0 extraction based on a fixed-point method in the frequency domain
-
     f0v, vrv, dfv, _, aav = fixpF0VexMltpBG4(
-        x, fs, f0floor, nvc, nvo, mu, imageOn, f0shiftm, smp, minsm, pcf0, nh
+        x,
+        fs,
+        f0floor,
+        nvc,
+        nvo,
+        prm["IFWindowStretch"],
+        prm["F0frameUpdateInterval"],
+        prm["IFsmoothingLengthRelToFc"],
+        prm["IFminimumSmoothingLength"],
+        prm["IFexponentForNonlinearSum"],
+        prm["IFnumberOfHarmonicForInitialEstimate"],
+        prm["DisplayPlots"],
     )
     # if imageOn
     #     title([fname '  ' datestr(now,0)])
     #     drawnow
 
     # ---- post processing for V/UV decision and F0 tracking
-    pwt, pwh = zplotcpower(x, fs, f0shiftm, imageOn)
+    pwt, pwh = zplotcpower(x, fs, prm["F0frameUpdateInterval"], prm["DisplayPlots"])
+
+    # paramaters for F0 refinement
+    # fftlf0r =   # fftlf0r=1024 # FFT length for F0 refinement
+    # tstretch =   # tstretch=1.1 # time window stretching factor
+    # nhmx =   # nhmx=3 # number of harmonic components for F0 refinement
+    # iPeriodicityInterval = prm[
+    #     "periodicityFrameUpdateInterval"
+    # ]  # frame update interval for periodicity index (ms)
 
     f0raw, irms, *_ = f0track5(
-        f0v, vrv, dfv, pwt, pwh, aav, f0shiftm, imageOn
+        f0v, vrv, dfv, pwt, pwh, aav, prm["F0frameUpdateInterval"], prm["DisplayPlots"]
     )  # 11/Sept./2005
     f0t = f0raw
     f0t[f0t == 0] = np.nan
@@ -146,17 +143,18 @@ def straight_pitch(x: ArrayLike, fs: Real, optionalParams: dict | None = None)->
     nedp = len(f0raw)  # last position of F0 refinement (samples)
     dn = floor(fs / (f0ceil * 3 * 2))  # fix by H.K. at 28/Jan./2003
     [f0raw, ecr] = refineF06(
-        sps.decimate(x, dn),
+        decimate(x, dn),
         fs / dn,
         f0raw,
-        fftlf0r,
-        tstretch,
-        nhmx,
-        f0shiftm,
+        prm["refineFftLength"],
+        prm["refineTimeStretchingFactor"],
+        prm["refineNumberofHarmonicComponent"],
+        prm["F0frameUpdateInterval"],
         nstp,
         nedp,
-        imageOn,
-    )  # 31/Aug./2004# 11/Sept.2005
+        prm["DisplayPlots"],
+    )
+    # 31/Aug./2004# 11/Sept.2005
 
     # if imageOn
     #     f0t=f0raw
@@ -305,58 +303,3 @@ def zinitializeParameters():
         periodicityFrameUpdateInterval=5,  # frame update interval for periodicity index (ms)return
         note=" ",
     )  # Any text to be printed on the source information plot
-
-
-###--------
-# def replaceSuppliedParameters(prmin):
-#     prm=zinitializeParameters
-#     if isfield(prmin,'F0searchLowerBound')==1
-#         prm['F0searchLowerBound=prmin.F0searchLowerBound']
-#     end
-#     if isfield(prmin,'F0searchUpperBound')==1
-#         prm['F0searchUpperBound=prmin.F0searchUpperBound']
-#     end
-#     if isfield(prmin,'F0defaultWindowLength')==1
-#         prm['F0defaultWindowLength=prmin.F0defaultWindowLength']
-#     end
-#     if isfield(prmin,'F0frameUpdateInterval')==1
-#         prm['F0frameUpdateInterval=prmin.F0frameUpdateInterval']
-#     end
-#     if isfield(prmin,'NofChannelsInOctave')==1
-#         prm['NofChannelsInOctave=prmin.NofChannelsInOctave']
-#     end
-#     if isfield(prmin,'IFWindowStretch')==1
-#         prm['IFWindowStretch=prmin.IFWindowStretch']
-#     end
-#     if isfield(prmin,'DisplayPlots')==1
-#         prm['DisplayPlots=prmin.DisplayPlots']
-#     end
-#     if isfield(prmin,'IFsmoothingLengthRelToFc')==1
-#         prm['IFsmoothingLengthRelToFc=prmin.IFsmoothingLengthRelToFc']
-#     end
-#     if isfield(prmin,'IFminimumSmoothingLength')==1
-#         prm['IFminimumSmoothingLength=prmin.IFminimumSmoothingLength']
-#     end
-#     if isfield(prmin,'IFexponentForNonlinearSum')==1
-#         prm['IFexponentForNonlinearSum=prmin.IFexponentForNonlinearSum']
-#     end
-#     if isfield(prmin,'IFnumberOfHarmonicForInitialEstimate')==1
-#         prm['IFnumberOfHarmonicForInitialEstimate=prmin.IFnumberOfHarmonicForInitialEstimate']
-#     end
-#     if isfield(prmin,'refineFftLength')==1
-#         prm['refineFftLength=prmin.refineFftLength']
-#     end
-#     if isfield(prmin,'refineTimeStretchingFactor')==1
-#         prm['refineTimeStretchingFactor=prmin.refineTimeStretchingFactor']
-#     end
-#     if isfield(prmin,'refineNumberofHarmonicComponent')==1
-#         prm['refineNumberofHarmonicComponent=prmin.refineNumberofHarmonicComponent']
-#     end
-#     if isfield(prmin,'periodicityFrameUpdateInterval')==1
-#         prm['periodicityFrameUpdateInterval=prmin.periodicityFrameUpdateInterval']
-#     end
-#     if isfield(prmin,'note')==1
-#         prm['note=prmin.note']
-#     end
-
-#     return prm

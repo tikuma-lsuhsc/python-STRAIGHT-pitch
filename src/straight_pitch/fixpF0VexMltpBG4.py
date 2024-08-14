@@ -5,32 +5,66 @@ import logging
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-from numpy.typing import ArrayLike, NDArray
-from numbers import Real
+from numpy.typing import NDArray
 
-from math import ceil, floor, log2, pi, sqrt
+from math import ceil, floor, pi, sqrt
 import numpy as np
 from scipy import signal as sps
 
 from .multanalytFineCSPB import multanalytFineCSPB
+from .utils import decimate
 
 
-def fixpF0VexMltpBG4(x, fs, f0floor, nvc, nvo, mu, imgi, shiftm, smp, minm, pc, nc):
-    # 	Fixed point analysis to extract F0
-    # 	[f0v,vrv,dfv,nf]=fixpF0VexMltpBG4(x,fs,f0floor,nvc,nvo,mu,imgi,shiftm,smp,minm,pc,nc)
-    # 	x	: input signal
-    # 	fs	: sampling frequency (Hz)
-    # 	f0floor	: lowest frequency for F0 search
-    # 	nvc	: total number of filter channels
-    # 	nvo	: number of channels per octave
-    # 	mu	: temporal stretching factor
-    # 	imgi	: image display indicator (1: display image, default)
-    # 	shiftm	: frame shift in ms
-    # 	smp	: smoothing length relative to fc (ratio)
-    # 	minm	: minimum smoothing length (ms)
-    # 	pc	: exponent to represent nonlinear summation
-    # 	nc	: number of harmonic component to use (1,2,3)
+def fixpF0VexMltpBG4(
+    x: NDArray,
+    fs: float,
+    f0floor: float,
+    nvc: int,
+    nvo: int = 24,
+    mu: float = 1.2,
+    shiftm: float = 1,
+    smp: float = 1,
+    minm: float = 5,
+    pc: float = 0.5,
+    nc: int = 1,
+    imgi: bool = False,
+):
+    """Fixed point analysis to extract F0
 
+    Parameters
+    ----------
+    x
+        input signal
+    fs
+        sampling frequency (Hz)
+    f0floor
+        lowest frequency for F0 search
+    nvc
+        total number of filter channels
+    nvo, optional
+        number of channels per octave, by default 24
+    mu, optional
+        temporal stretching factor, by default 1.2
+    shiftm, optional
+        frame shift in ms, by default 1
+    smp, optional
+        smoothing length relative to fc (ratio), by default 1
+    minm, optional
+        minimum smoothing length (ms), by default 5
+    pc, optional
+        exponent to represent nonlinear summation, by default 0.5
+    nc, optional
+        number of harmonic component to use (1,2,3), by default 1
+    imgi, optional
+        image display indicator, by default False
+
+    Returns
+    -------
+        f0v: NDArray
+        vrv: NDArray
+        dfv: NDArray
+        nf: NDArray
+    """
     # 	Designed and coded by Hideki Kawahara
     # 	28/March/1999
     # 	04/April/1999 revised to multi component version
@@ -49,13 +83,17 @@ def fixpF0VexMltpBG4(x, fs, f0floor, nvc, nvo, mu, imgi, shiftm, smp, minm, pc, 
     # nvc=52
     # mu=1.1
 
+    # remove the low-frequency noise
     x = cleaninglownoise(x, fs, f0floor)
 
     fxx = f0floor * 2.0 ** (np.arange(nvc) / nvo)
     fxh = fxx[-1]  # max(fxx)
 
+    # minimum number of samples per cycles
     dn = max(1, floor(fs / (fxh * 6.3)))
-    xd = sps.decimate(x, dn)
+
+    # decimate so the highest pitch presents only one cycle
+    xd = decimate(x, dn)
 
     if nc > 2:
         pm3 = multanalytFineCSPB(
@@ -73,7 +111,7 @@ def fixpF0VexMltpBG4(x, fs, f0floor, nvc, nvo, mu, imgi, shiftm, smp, minm, pc, 
         pm2 = pm2[:, ::3]
 
     pm1 = multanalytFineCSPB(
-        sps.decimate(x, dn * 3), fs / (dn * 3), f0floor, nvc, nvo, mu, 1, imgi
+        decimate(x, dn * 3), fs / (dn * 3), f0floor, nvc, nvo, mu, 1, imgi
     )
     # error crrect 2002.9.19(mu was fixed 1.1)
     #### safe guard added on 15/Jan./2003
@@ -148,9 +186,9 @@ def fixpF0VexMltpBG4(x, fs, f0floor, nvc, nvo, mu, imgi, shiftm, smp, minm, pc, 
     smap = zsmoothmapB(mmp, fs / dn, f0floor, nvo, smp, minm, 0.4) if smp != 0 else mmp
 
     fixpp = np.zeros((round(nn / 3), mm))
-    fixvv = fixpp + 100000000
-    fixdf = fixpp + 100000000
-    fixav = fixpp + 1000000000
+    fixvv = np.full_like(fixpp, 100000000)
+    fixdf = np.full_like(fixpp, 100000000)
+    fixav = np.full_like(fixpp, 1000000000)
     nf = np.zeros(mm, dtype=int)
     # if imgi==1 hpg=waitbar(0,'Fixed pints calculation') end # 07/Dec./2002 by H.K.#10/Aug./2005
     for ii in range(mm):
@@ -446,17 +484,15 @@ def znrmlcf2(f):
 
 
 # #--------------------------------------------
-def cleaninglownoise(x, fs, f0floor):
+def cleaninglownoise(x, fs, f0floor, flm=50):
 
-    flm = 50
     flp = round(fs * flm / 1000)
-    nn = len(x)
-    wlp = sps.firwin(flp * 2, f0floor / (fs / 2))  # fir1(flp*2,f0floor/(fs/2))
+    wlp = sps.firwin(flp * 2, f0floor / (fs / 2))
     wlp[flp] = wlp[flp] - 1
     wlp = -wlp
 
-    tx = np.pad(x, (0, 2 * len(wlp)))
-    ttx = sps.lfilter(wlp, [1], tx)  # fftfilt(wlp,tx)
-    x = ttx[flp : nn + flp]
+    tx = np.pad(x, (0, len(wlp)))
+    ttx = sps.lfilter(wlp, 1, tx)
+    x = ttx[flp:-flp]
 
     return x
