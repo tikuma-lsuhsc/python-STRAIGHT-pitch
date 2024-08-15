@@ -17,7 +17,31 @@ from scipy import signal as sps
 from matplotlib import pyplot as plt
 
 
-def multanalytFineCSPB(x: NDArray, f0: NDArray, eta: float) -> NDArray[np.complex128]:
+@lru_cache(512)
+def get_filter(f0i, f0_eta_i, nwmaxi, nhmaxi, mlt):
+    n = np.arange(0.5, nwmaxi)
+    w = np.exp(pi * (2j * f0i * n - (f0_eta_i * n) ** 2))
+    w = np.exp(-pi * (f0_eta_i * n) ** 2)
+
+    n1 = np.arange(0.5, nhmaxi)
+    h = 1 - f0_eta_i * n1
+
+    wbias = nwmaxi + nhmaxi - 1
+    return np.convolve(
+        np.concatenate([w[-1::-1], w]), np.concatenate([h[-1::-1], h])
+    ) * np.exp(2j * pi * mlt * f0i * np.arange(-wbias, wbias + 1))
+
+
+def run_filter(x, nx, f0i, f0_eta_i, nwmaxi, nhmaxi, mlt):
+    wwd = get_filter(f0i, f0_eta_i, nwmaxi, nhmaxi, mlt)
+    wbias = nwmaxi + nhmaxi
+    pmtmp1 = sps.lfilter(wwd, 1, x[: nx + 2 * wbias])
+    return pmtmp1[wbias:-wbias]
+
+
+def multanalytFineCSPB(
+    x: NDArray, f0: NDArray, eta: float, mlt: int
+) -> NDArray[np.complex128]:
     """Dual waveleta analysis using cardinal spline manipulation
 
     Parameters
@@ -58,32 +82,11 @@ def multanalytFineCSPB(x: NDArray, f0: NDArray, eta: float) -> NDArray[np.comple
     #     hpg=waitbar(0,['wavelet analysis for initial F0 ' ...
     #         'and P/N estimation with HM#:' num2str(mlt)])
 
-    @lru_cache(512)
-    def get_filter(f0i, f0_eta_i, nwmaxi, nhmaxi):
-        n = np.arange(0.5, nwmaxi)
-        w = np.exp(pi * (2j * f0i * n - (f0_eta_i * n) ** 2))
-
-        n1 = np.arange(0.5, nhmaxi)
-        h = 1 - f0_eta_i * n1
-
-        ws = np.convolve(np.concatenate([w[-1::-1], w]), np.concatenate([h[-1::-1], h]))
-        nws = 2 * (nwmaxi + nhmaxi) - 1
-
-        np.exp((2j * pi * f0min) * (np.arange(nws // 2, nws // 2 + nws)))
-
-        return ws
-
-    def run_filter(f0i, f0_eta_i, nwmaxi, nhmaxi):
-        wwd = get_filter(f0i, f0_eta_i, nwmaxi, nhmaxi)
-        wbias = nwmaxi + nhmaxi
-        pmtmp1 = sps.lfilter(wwd, 1, tx[: nx + 2 * wbias])
-        return pmtmp1[wbias:-wbias]
-
     # 07/Dec./2002 by H.K.#10/Aug./2005
     nx = len(x)
     pm = np.zeros((len(f0), nx), complex)
     for i, (f0i, f0_eta_i, nwmaxi, nhmaxi) in enumerate(zip(f0, f0_eta, nwmax, nhmax)):
-        pm[i] = run_filter(f0i, f0_eta_i, nwmaxi, nhmaxi)
+        pm[i] = run_filter(tx, nx, f0i, f0_eta_i, nwmaxi, nhmaxi, mlt)
 
     pm = pm * np.sqrt(f0 / f0min).reshape(-1, 1)
 

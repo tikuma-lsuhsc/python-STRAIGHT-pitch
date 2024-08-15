@@ -77,20 +77,7 @@ def multanalytFineCSPB(
 
     # 07/Dec./2002 by H.K.#10/Aug./2005
     for ii in range(nvc):
-        tb = gent * mpv
-        t = tb[np.abs(tb) < 3.5 * mu * t0]
-        wd1 = np.exp(-pi * (t / t0 / mu) ** 2)
-        # wd1 = wd1 * np.exp((2j * pi * mlt) * t / t0)
-        wd2 = np.maximum(0, 1 - np.abs(t / t0 / mu))
-        wd2 = wd2[wd2 > 0]
-        wwd = np.convolve(wd2, wd1)
-        wwd = wwd[np.abs(wwd) > 0.00001]
-        wbias = (len(wwd) - 1) // 2
-        wwd = wwd * np.exp(
-            (2j * pi * mlt)
-            * t[np.round(np.arange(len(wwd)) - wbias + len(t) / 2).astype(int)]
-            / t0
-        )
+        wwd, wbias = get_filter(mu, mlt, t0, gent, mpv)
         pmtmp1 = sps.lfilter(wwd, 1, tx)  # fftfilt(wwd,tx)
         pm[ii, :] = pmtmp1[wbias : wbias + nx] * np.sqrt(mpv)
         mpv = mpv * (2.0 ** (1 / nvo))
@@ -105,3 +92,21 @@ def multanalytFineCSPB(
     # 07/Dec./2002 by H.K.#10/Aug./2005
 
     return pm
+
+def get_filter(mu, mlt, t0, gent, mpv):
+    tb = gent * mpv
+    t = tb[np.abs(tb) < 3.5 * mu * t0]
+    wd1 = np.exp(-pi * (t / t0 / mu) ** 2)
+    # wd1 = wd1 * np.exp((2j * pi * mlt) * t / t0)
+    wd2 = np.maximum(0, 1 - np.abs(t / t0 / mu))
+    wd2 = wd2[wd2 > 0]
+    wwd = np.convolve(wd2, wd1)
+    wwd = wwd[np.abs(wwd) > 0.00001]
+    wbias = (len(wwd) - 1) // 2
+    wwd = wwd * np.exp(
+            (2j * pi * mlt)
+            * t[np.round(np.arange(len(wwd)) - wbias + len(t) / 2).astype(int)]
+            / t0
+        )
+    
+    return wwd,wbias

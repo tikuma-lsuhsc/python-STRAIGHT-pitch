@@ -8,8 +8,11 @@ from matplotlib import pyplot as plt
 from math import ceil, floor, log2
 import numpy as np
 
-from straight_pitch.multanalytFineCSPB1 import multanalytFineCSPB as multanalytFineCSPB1
-from straight_pitch.multanalytFineCSPB import multanalytFineCSPB
+from straight_pitch.multanalytFineCSPB1 import (
+    multanalytFineCSPB as multanalytFineCSPB1,
+    get_filter as get_filter1,
+)
+from straight_pitch.multanalytFineCSPB import multanalytFineCSPB, get_filter
 
 fs, x = ff.audio.read("test/vaiueo2d.wav", sample_fmt="dbl", ac=1)
 
@@ -24,9 +27,32 @@ nvc = ceil(log2(f0ceil / f0floor) * nvo)  # number of channels
 f0 = f0floor * 2 ** (np.arange(nvc) / nvo)
 eta = 1.2
 mlt = 1
-# Pm = multanalytFineCSPB1(x, mlt * f0 / fs, eta)
+Pm = multanalytFineCSPB1(x, f0 / fs, eta, mlt)
 
-Pm = multanalytFineCSPB(x, fs, f0floor, nvc, nvo, eta, mlt)
+# t0 = 1 / f0floor
+# lmx = round(6 * t0 * fs * eta)
+# wl = 2 ** ceil(log2(lmx))
+
+# nx = len(x)
+# tx = np.pad(x, (0, wl))
+# gent = (np.arange(wl) - wl / 2) / fs
+
+# ws, wbias = get_filter(eta, mlt, t0, gent, 1)
+
+# f0min = np.min(f0)
+# f0_eta = f0 / eta/fs
+
+# nwmax = np.ceil(3.5 / f0_eta).astype(int)
+# nhmax = np.ceil(1 / f0_eta).astype(int)
+
+# ws1 = get_filter1(f0[0] / fs, f0_eta[0], nwmax[0], nhmax[0])
+
+# plt.plot(ws.real, ws.imag, ".-")
+# plt.plot(ws1.real, ws1.imag, ".-")
+# plt.show()
+
+# Pm = multanalytFineCSPB(x, fs, f0floor, nvc, nvo, eta, mlt)
+
 plt.imshow(np.abs(Pm), origin="lower", aspect="auto")
 plt.show()
 # plt.specgram(x,Fs=fs)
