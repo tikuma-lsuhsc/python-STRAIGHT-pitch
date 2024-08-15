@@ -13,7 +13,7 @@ import numpy as np
 from scipy import signal as sps
 from scipy.fft import next_fast_len
 
-from .fixpF0VexMltpBG4 import fixpF0VexMltpBG4
+from .fixpF0VexMltpBG41 import fixpF0VexMltpBG4
 from .f0track5 import f0track5
 from .refineF06 import refineF06
 from .utils import decimate

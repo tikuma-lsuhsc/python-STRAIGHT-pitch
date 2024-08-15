@@ -5,17 +5,14 @@ import logging
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-from functools import lru_cache
 from numpy.typing import NDArray
 
 from math import ceil, floor, pi, sqrt
 import numpy as np
 from scipy import signal as sps
 
-from .multanalytFineCSPB import multanalytFineCSPB
-from .utils import decimate, fftfilt
-
-two_pi = 2 * pi
+from .multanalytFineCSPB1 import multanalytFineCSPB
+from .utils import decimate
 
 
 def fixpF0VexMltpBG4(
@@ -89,91 +86,104 @@ def fixpF0VexMltpBG4(
     # remove the low-frequency noise
     x = cleaninglownoise(x, fs, f0floor)
 
-    # f0 search grid
-    Fxx = f0floor * 2 ** (np.arange(nvc) / nvo)
-
-    fxx = Fxx / fs
-    omegaxx = two_pi * fxx.reshape(-1, 1)
+    fxx = f0floor * 2.0 ** (np.arange(nvc) / nvo)
+    fxh = fxx[-1]  # max(fxx)
 
     # minimum number of samples per cycles
-    dn = max(1, floor(1 / (fxx[-1] * 6.3)))
+    dn = max(1, floor(fs / (fxh * 6.3)))
 
     # decimate so the highest pitch presents only one cycle
     xd = decimate(x, dn)
 
-    # compute up-to-3 gabor spectrograms -> frequency map (in Hz)
+    if nc > 2:
+        pm3 = multanalytFineCSPB(
+            xd, fs / dn, f0floor, nvc, nvo, mu, 3, imgi
+        )  # error crrect 2002.9.19 (mu was fixed 1.1)
+        pif3 = zwvlt2ifq(pm3, fs / dn)
+        pif3 = pif3[:, ::3]
+        pm3 = pm3[:, ::3]
 
-    dn1 = dn * 3  # 1st harmonic decimation factor
-    pm1 = multanalytFineCSPB(decimate(x, dn1), fxx / dn1, mu, 1)
+    if nc > 1:
+        pm2 = multanalytFineCSPB(xd, fs / dn, f0floor, nvc, nvo, mu, 2, imgi)
+        # error crrect 2002.9.19(mu was fixed 1.1)
+        pif2 = zwvlt2ifq(pm2, fs / dn)
+        pif2 = pif2[:, ::3]
+        pm2 = pm2[:, ::3]
+
+    pm1 = multanalytFineCSPB(
+        decimate(x, dn * 3), fs / (dn * 3), f0floor, nvc, nvo, mu, 1, imgi
+    )
+    # error crrect 2002.9.19(mu was fixed 1.1)
     #### safe guard added on 15/Jan./2003
-    pm1[pm1 == 0] = np.max(np.abs(pm1)) / 10e7
+    mxpm1 = np.max(np.abs(pm1))
+    eeps = mxpm1 / 10000000
+    pm1[pm1 == 0] = eeps
     #### safe guard end
-    pif1 = zwvlt2ifq(pm1, fs / dn1)
-    mm = pif1.shape[1]  # number of frames
+    pif1 = zwvlt2ifq(pm1, fs / (dn * 3))
+    # keyboard
+
+    mm = pif1.shape[1]
+    if nc > 1:
+        mm = min(mm, pif2.shape[1])
+
+    if nc > 2:
+        mm = min(mm, pif3.shape[1])
+
+    if nc == 2:
+        for ii in range(mm):
+            pif2[:, ii] = (
+                pif1[:, ii] * (np.abs(pm1[:, ii])) ** pc
+                + pif2[:, ii] / 2 * (np.abs(pm2[:, ii])) ** pc
+            ) / ((np.abs(pm1[:, ii])) ** pc + (np.abs(pm2[:, ii])) ** pc)
+
+    if nc == 3:
+        for ii in range(mm):
+            pif2[:, ii] = (
+                pif1[:, ii] * (np.abs(pm1[:, ii])) ** pc
+                + pif2[:, ii] / 2 * (np.abs(pm2[:, ii])) ** pc
+                + pif3[:, ii] / 3 * (np.abs(pm3[:, ii])) ** pc
+            ) / (
+                (np.abs(pm1[:, ii])) ** pc
+                + (np.abs(pm2[:, ii])) ** pc
+                + (np.abs(pm3[:, ii])) ** pc
+            )
 
     if nc == 1:
         pif2 = pif1
 
-    if nc > 1:
-        pm2 = multanalytFineCSPB(xd, fxx / dn, mu, 2)
-        pif2 = zwvlt2ifq(pm2, fs / dn)
-        pif2 = pif2[:, ::3]
-        pm2 = pm2[:, ::3]
-        mm = min(mm, pif2.shape[1])
+    # pif2=zwvlt2ifq(pm,fs/dn)*2*pi
+    pif2 = pif2 * 2 * pi
+    dn = dn * 3
 
-    if nc > 2:
-        pm3 = multanalytFineCSPB(xd, fxx / dn, mu, 3)
-        pif3 = zwvlt2ifq(pm3, fs / dn)
-        pif3 = pif3[:, ::3]
-        pm3 = pm3[:, ::3]
-        mm = min(mm, pif3.shape[1])
-
-    pif1 = pif1[:, :mm]
-
-    # combine pif2 & pif3
-    pm1abs = np.abs(pm1)
-    if nc > 1:
-        pif2 = pif2[:, :mm]
-        a1 = pm1abs**pc
-        a2 = np.abs(pm2) ** pc
-        pif2_num = pif1 * a1 + pif2 / 2 * a2
-        pif2_den = a1 + a2
-
-        if nc == 3:
-            pif3 = pif3[:, :mm]
-            a3 = np.abs(pm3) ** pc
-            pif2_num += pif3 / 3 * a3
-            pif2_den += a3
-
-        pif2 = pif2_num / pif2_den
-
-    pif2 = pif2 * two_pi
-    dn = dn * 3  # =dn1
-    fsn = fs / dn  # sampling rate after decimation
-
-    slp = zifq2gpm2(pif2, omegaxx)
+    slp, _ = zifq2gpm2(pif2, f0floor, nvo)
     nn, mm = pif2.shape
-    dpif = np.empty_like(pif2)
-    dpif[:, :-1] = (pif2[:, 1:] - pif2[:, :-1]) * fsn
-    dpif[:, -1] = dpif[:, -1]
-    dslp = zifq2gpm2(dpif, omegaxx)
+    dpif = (pif2[:, 1:] - pif2[:, :-1]) * fs / dn
+    dpif = np.concatenate([dpif, dpif[:, -1:]], axis=1)
+    dslp, _ = zifq2gpm2(dpif, f0floor, nvo)
 
-    # damp = np.zeros_like(pm1)
-    # damp[:, :-1] = (pm1abs[:, 1:] - pm1abs[:, :-1]) * fsn
-    # damp[:, -1] = damp[:, -1]
-    # damp = damp / pm1abs
+    damp = (np.abs(pm1[:, 1:]) - np.abs(pm1[:, :-1])) * fs / dn
+    damp = np.concatenate([damp, damp[:, -1:]], axis=1)
+    damp = damp / np.abs(pm1)
 
     # [c1,c2]=znormwght(1000)
-    mmp = np.zeros_like(dslp)
+    fxx = f0floor * 2.0 ** (np.arange(nn) / nvo) * 2 * pi
+    mmp = 0 * dslp
     c1, c2b = znrmlcf2(1)
-    c2 = c2b * (omegaxx / two_pi) ** 2
-    # cff = damp / omegaxx * two_pi * 0
-    # mmp = (dslp / (1 + cff**2) / sqrt(c2)) ** 2 + (
-    #     slp / np.sqrt(1 + cff**2) / np.sqrt(c1)
-    # ) ** 2
-    mmp = (dslp / np.sqrt(c2)) ** 2 + (slp / np.sqrt(c1)) ** 2
+    # if imgi==1 hpg=waitbar(0,'P/N map calculation') end # 07/Dec./2002 by H.K.#10/Aug./2005
 
-    smap = zsmoothmapB(mmp, fxx, smp, minm * 1e-3 * fs, 0.4) if smp != 0 else mmp
+    for ii in range(nn):
+        # 	[c1,c2]=znrmlcf2(fxx[ii]/2/pi) # This is OK, but the next Eq is much faster.
+        c2 = c2b * (fxx[ii] / 2 / pi) ** 2
+        cff = damp[ii, :] / fxx[ii] * 2 * pi * 0
+        mmp[ii, :] = (dslp[ii, :] / (1 + cff**2) / sqrt(c2)) ** 2 + (
+            slp[ii, :] / np.sqrt(1 + cff**2) / np.sqrt(c1)
+        ) ** 2
+        # if imgi==1 waitbar(ii/nn) end #,hpg) # 07/Dec./2002 by H.K.#10/Aug./2005
+
+    # if imgi==1 close(hpg) end
+    # 10/Aug./2005
+
+    smap = zsmoothmapB(mmp, fs / dn, f0floor, nvo, smp, minm, 0.4) if smp != 0 else mmp
 
     fixpp = np.zeros((round(nn / 3), mm))
     fixvv = np.full_like(fixpp, 100000000)
@@ -311,25 +321,14 @@ def fixpF0VexMltpBG4(
 
 
 # #----------------------------------------------------------------
-def zwvlt2ifq(pm: NDArray, fs: float) -> NDArray:
-    """Wavelet to instantaneous frequency map
-
-    Parameters
-    ----------
-    pm
-        symmetrical Gabor wavelet (2D complex)
-    fs
-        sampling rate
-
-    Returns
-    -------
-        frequency map in Hz (same dimensions as `pm`)
-    """
+def zwvlt2ifq(pm, fs):
+    # 	Wavelet to instantaneous frequency map
+    # 	fqv=wvlt2ifq(pm,fs)
 
     # 	Coded by Hideki Kawahara
     # 	02/March/1999
 
-    pm = pm / np.abs(pm)
+    pm = pm / (np.abs(pm))
     pif = np.abs(pm - np.concatenate([pm[:, :1], pm[:, :-1]], axis=1))
     pif = fs / pi * np.asin(pif / 2)
     pif[:, 1] = pif[:, 2]
@@ -340,44 +339,37 @@ def zwvlt2ifq(pm: NDArray, fs: float) -> NDArray:
 # #----------------------------------------------------------------
 
 
-def zifq2gpm2(pif: NDArray, omegax: NDArray) -> NDArray:
-    """Geometric parameter of instantaneous frequency
+def zifq2gpm2(pif, f0floor, nvo):
+    """Instantaneous frequency 2 geometric parameters
 
-    Parameters
-    ----------
-    pif
-        2D instantaneous frequency map in Hz [omegax bins x frames]
-    omegax
-        frequency bins in radian/s
-
-    Returns
-    -------
-        slp: Geometric parameter slp (first order coefficients)
-        # pbl		: second order coefficient
+    [slp,pbl]=ifq2gpm(pif,f0floor,nvo)
+    slp		: first order coefficient
+    pbl		: second order coefficient
     """
-
     # 	Coded by Hideki Kawahara
     # 	02/March/1999
 
-    # mean of weighted difference (partial wrt omegax bins)
-    dpif = np.diff(omegax * pif, 1, axis=0) / np.diff(omegax, axis=0)
-    slp = np.empty_like(pif)
-    slp[1:-1] = (dpif[:-1] + dpif[1:]) / 2
-    slp[0] = slp[1]
-    slp[-1] = slp[-2]
-    # slp=((pif(2:nn-1,:)-pif(1:nn-2,:))/(1-1/c) + (pif(3:nn,:)-pif(2:nn-1,:))/(c-1))/2
-    # slp=[slp(1,:);slp;slp(nn-2,:)];
-    slp = slp / omegax
+    fx = f0floor * 2.0 ** (np.arange(pif.shape[0]) / nvo) * 2 * pi
 
-    # second parameter
-    # c=2.0^(1/nvo);
-    # g=[1/c/c 1/c 1;1 1 1;c*c c 1];
-    # h=inv(g);
-    # pbl=pif(1:nn-2,:)*h(2,1)+pif(2:nn-1,:)*h(2,2)+pif(3:nn,:)*h(2,3);
-    # pbl=[pbl(1,:);pbl;pbl(nn-2,:)];
-    # pbl=pbl/fx(:);
+    c = 2.0 ** (1 / nvo)
+    g = np.array([[1 / (c * c), 1 / c, 1], [1, 1, 1], [c * c, c, 1]])
+    h = np.linalg.inv(g)
 
-    return slp  # , pbl
+    # slp=pif[:-2]*h(1,1)+pif[1:-1]*h(1,2)+pif[2:]*h(1,3)
+    slp = ((pif[1:-1] - pif[:-2]) / (1 - 1 / c) + (pif[2:] - pif[1:-1]) / (c - 1)) / 2
+    slp = np.vstack([slp[0, :], slp, slp[-2, :]])
+
+    pbl = pif[:-2] * h[1, 0] + pif[1:-1] * h[1, 1] + pif[2:] * h[1, 2]
+    pbl = np.vstack([pbl[0, :], pbl, pbl[-2, :]])
+
+    for ii in range(pif.shape[0]):
+        slp[ii, :] = slp[ii, :] / fx[ii]
+        pbl[ii, :] = pbl[ii, :] / fx[ii]
+
+    slp = slp / fx.reshape(-1, 1)
+    pbl = pbl / fx.reshape(-1, 1)
+
+    return slp, pbl
 
 
 # #------------------------------------------
@@ -392,91 +384,44 @@ def zifq2gpm2(pif: NDArray, omegax: NDArray) -> NDArray:
 # #-------------------------------------------
 
 
-@lru_cache(2)
-def zGcBs(n: int, k: float) -> tuple[NDArray, NDArray]:
-    x = np.arange(3 * n + 1) / n
-    f = np.exp(-pi * x**2) * np.sinc(x) ** 2
-    return x, ((x**k * f) if k != 0 else f)
+def zGcBs(x, k):
+
+    tt = x + 0.0000001
+    p = (
+        tt**k
+        * np.exp(-pi * tt**2)
+        * (np.sin(pi * tt + 0.0001) / (pi * tt + 0.0001)) ** 2
+    )
+    return p
 
 
 # #--------------------------------------------
+def zsmoothmapB(map, fs, f0floor, nvo, mu, mlim, pex):
 
+    nvc, mm = map.shape
+    # mu=0.4
+    t0 = 1 / f0floor
+    lmx = round(6 * t0 * fs * mu)
+    wl = 2 ** ceil(np.log2(lmx))
+    gent = (np.arange(wl) - wl / 2) / fs
 
-@lru_cache(512)
-def zsmoothmapB_filters(f: float, mu: float, pex: float) -> tuple[NDArray, NDArray]:
-    """design smoothing FIR filter for a given frequency
-
-    Parameters
-    ----------
-    f
-        normalized frequency
-    mu
-        smoothing length relative to fc (ratio)
-    pex
-        ???
-
-    Returns
-    -------
-        wd1 and wd2
-    """
-    n = np.arange(3.5 * mu / f)
-    b = -pi * (n * f / mu) ** 2
-    nb = len(n)
-
-    def build(c):
-        hp = np.exp(b * c**-2)
-        h = np.empty(2 * nb - 1)
-        h[:nb-1] = hp[-1:0:-1]
-        h[nb-1:] = hp
-        return h
-
-    return build(1 - pex), build(1 + pex), nb
-
-
-def zsmoothmapB(
-    map: NDArray, f: NDArray, mu: float, mlim: float, pex: float
-) -> NDArray:
-    """smooth the frequency(?) map
-
-    Parameters
-    ----------
-    map
-        input map
-    f
-        monotonically increasing frequency bins in normalized frequency
-    mu
-        smoothing length relative to fc (ratio)
-    mlim
-        minimum smoothing length in samples
-    pex
-        ???
-
-    Returns
-    -------
-        smoothed map
-    """
-
-    # set the shortest filter length, and mark the frequencies beyond it
-    fmax = mu / mlim
-    imax = np.argmax(f > fmax) if f[-1] > fmax else len(f)
-
-    if imax == 0:
-        raise ValueError(f"{mlim=} is set too large.")
-
-    # preallocate the output to match the input shape
-    smap = np.empty_like(map)
-
-    # zero-pad the input
-    map = np.pad(map, [(0, 0), (0, round(7 * mu / f[0] + 1))])
-    n = smap.shape[1]
-
-    # perform the smoothing
-    for i, (fi, mapi) in enumerate(zip(f, map)):
-        if i < imax:
-            wd1, wd2, wbias = zsmoothmapB_filters(fi, mu, pex)
-        tmp = np.zeros(n + 2 * wbias)
-        tmp[: -2 * wbias] = 1 / fftfilt(wd1, mapi)[wbias:-wbias]
-        smap[i, :] = 1 / fftfilt(wd2, tmp)[wbias:-wbias]
+    smap = map
+    mpv = 1
+    zt = 0 * gent
+    iiv = np.arange(mm)
+    for ii in range(nvc):
+        t = gent * mpv  # t0*mu/mpv*1000
+        t = t[np.abs(t) < 3.5 * mu * t0]
+        wbias = round((len(t) - 1) / 2)
+        wd1 = np.exp(-pi * (t / (t0 * (1 - pex)) / mu) ** 2)
+        wd2 = np.exp(-pi * (t / (t0 * (1 + pex)) / mu) ** 2)
+        wd1 = wd1 / np.sum(wd1)
+        wd2 = wd2 / np.sum(wd2)
+        tm = sps.lfilter(wd1, 1, np.concatenate([map[ii, :], zt], axis=0))
+        tm = sps.lfilter(wd2, 1, np.concatenate([1.0 / tm[iiv + wbias], zt], axis=0))
+        smap[ii, :] = 1.0 / tm[iiv + wbias]
+        if t0 * mu / mpv * 1000 > mlim:
+            mpv = mpv * (2.0 ** (1 / nvo))
 
     return smap
 
@@ -527,12 +472,13 @@ def zfixpfreq3(fxx, pif2, mmp, dfv, pm):
 def znrmlcf2(f):
 
     n = 100
-    x, g = zGcBs(n, 0)
-    dgs = np.empty_like(g)
-    dgs[:-1] = np.diff(g) * n
-    dgs[-1] = 0
-    c1 = np.sum((x * dgs) ** 2) / n * 2
-    c2 = np.sum((2 * pi * f * x**2.0 * dgs) ** 2) / n * 2
+    x = np.arange(0, 3, 1 / n)
+    g = zGcBs(x, 0)
+    dg = np.concatenate([np.diff(g) * n, [0]])
+    dgs = dg / 2 / pi / f
+    xx = 2 * pi * f * x
+    c1 = np.sum((xx * dgs) ** 2) / n * 2
+    c2 = np.sum((xx**2.0 * dgs) ** 2) / n * 2
 
     return c1, c2
 

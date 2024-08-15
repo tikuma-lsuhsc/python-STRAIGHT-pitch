@@ -121,3 +121,56 @@ $$
 $$
 w_{wd}(n, f_{0,i}) = (w_{d2} \star w_{d1}) e^{j 2\pi m f_{0,i}\ n }
 $$
+
+
+
+
+
+    nvc, mm = map.shape
+    # mu=0.4
+    t0 = 1 / f0floor
+    lmx = round(6 * t0 * fs * mu)
+    wl = 2 ** ceil(np.log2(lmx))
+    gent = (np.arange(wl) - wl / 2) / fs
+
+    smap = map
+    mpv = 1
+    zt = 0 * gent
+    iiv = np.arange(mm)
+    for ii in range(nvc):
+        t = gent * mpv  # t0*mu/mpv*1000
+        t = t[np.abs(t) < 3.5 * mu * t0]
+        wbias = round((len(t) - 1) / 2)
+        wd1 = np.exp(-pi * (t / (t0 * (1 - pex)) / mu) ** 2)
+        wd2 = np.exp(-pi * (t / (t0 * (1 + pex)) / mu) ** 2)
+        wd1 = wd1 / np.sum(wd1)
+        wd2 = wd2 / np.sum(wd2)
+        tm = sps.lfilter(wd1, 1, np.concatenate([map[ii, :], zt], axis=0))
+        tm = sps.lfilter(wd2, 1, np.concatenate([1.0 / tm[iiv + wbias], zt], axis=0))
+        smap[ii, :] = 1.0 / tm[iiv + wbias]
+        if t0 * mu / mpv * 1000 > mlim:
+            mpv = mpv * (2.0 ** (1 / nvo))
+
+
+$t_{gen} = n/F_s$
+$m_{pv}(F) = F/F_{min}$
+$t = t_{gen} m_{pv} = n f/F_{min}$
+$t_0 = 1/F_{min}$
+$w_{d1}(F,t) = \exp \left[ -\pi\left(\frac{t}{t_0 \mu (1-p_{ex})}\right)^2 \right]$
+$w_{d2}(F,t) = \exp \left[ -\pi\left(\frac{t}{t_0 \mu (1+p_{ex})}\right)^2 \right]$
+
+$w_{d}(f,n) = \exp \left[ -\pi\left(\frac{n f}{\mu (1 \mp p_{ex})}\right)^2 \right]$
+
+    np.abs(t) < 3.5 * mu * t0
+
+$|t| < 3.5 \mu t_0$
+$|n| < 3.5 \mu/f$
+
+    # update IF
+    t0 * mu / mpv * 1000 > mlim
+
+$t_0 * \mu / m_{pv} * 1000 > m_{lim}$
+$f < \frac{\mu}{m_{lim} F_s } 10^{3}$
+
+$f_{max} = \frac{\mu}{m_{lim}}$
+$m_{lim}$ minimum smoothing length in samples
