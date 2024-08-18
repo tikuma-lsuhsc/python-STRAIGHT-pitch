@@ -174,3 +174,50 @@ $f < \frac{\mu}{m_{lim} F_s } 10^{3}$
 
 $f_{max} = \frac{\mu}{m_{lim}}$
 $m_{lim}$ minimum smoothing length in samples
+
+    """
+    :param fxx: frequencies of the frequency bins
+    :param pif2: instantaneous frequency map (freq bins x time samples)
+    :param mmp: relative noise power (freq bins x time samples)
+    :param dfv: time derivative of pif2 (freq bins x time samples)
+    :param aav: magnitude of H1 filterbank output (freq bins x time samples)
+    :return: (ff, vv, df, aa) - f0 candidates and their attributes
+
+             - ff - f0 candidates
+             - vv - relative noise powers ?
+             - df - time derivatives of pif2 ?
+             = aa - H1 filterbank output amplitudes ?
+
+             The attributes are linearly interpolated at ff values
+    """
+    nn = len(fxx)
+    iix = np.arange(nn)
+    cd1 = pif2 - fxx
+    cd2 = np.concatenate([np.diff(cd1), [cd1[-1] - cd1[-2]]])
+    cdd1 = np.concatenate([cd1[1:], [cd1[-1]]])
+    fp = (cd1 * cdd1 < 0) * (cd2 < 0)
+    ixx = iix[fp > 0]
+    ff = pif2[ixx] + (pif2[ixx + 1] - pif2[ixx]) * cd1[ixx] / (cd1[ixx] - cdd1[ixx])
+    # vv=mmp[ixx]
+    vv = mmp[ixx] + (mmp[ixx + 1] - mmp[ixx]) * (ff - fxx[ixx]) / (
+        fxx[ixx + 1] - fxx[ixx]
+    )
+    df = dfv[ixx] + (dfv[ixx + 1] - dfv[ixx]) * (ff - fxx[ixx]) / (
+        fxx[ixx + 1] - fxx[ixx]
+    )
+    aa = aav[ixx] + (aav[ixx + 1] - aav[ixx]) * (ff - fxx[ixx]) / (
+        fxx[ixx + 1] - fxx[ixx]
+    )
+
+$$
+e_i = p_i - f_i
+$$
+
+test
+
+$$
+\begin{aligned}
+f &= f_0 + \frac{(f_1 - f_0) e_0} {(e_0 -e_1)} \\
+  &= f_0 + \frac{(f_1 - f_0) (p_0 - f_0)} {(p_0 - f_0 - p_1 + f_1)}
+\end{aligned}
+$$

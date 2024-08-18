@@ -13,7 +13,7 @@ import numpy as np
 from scipy import signal as sps
 from scipy.fft import next_fast_len
 
-from .fixpF0VexMltpBG41 import fixpF0VexMltpBG4
+from .fixpF0VexMltpBG4 import fixpF0VexMltpBG4, cleaninglownoise
 from .f0track5 import f0track5
 from .refineF06 import refineF06
 from .utils import decimate
@@ -86,28 +86,25 @@ def straight_pitch(
     # nvo # Number of channels in one octave
     nvo = prm["NofChannelsInOctave"]
     nvc = ceil(log2(f0ceil / f0floor) * nvo)  # number of channels
+    Fxx = f0floor * 2 ** (np.arange(nvc) / nvo)  # channel center frequencies in Hz
 
-    # ---- F0 extraction based on a fixed-point method in the frequency domain
-    f0v, vrv, dfv, _, aav = fixpF0VexMltpBG4(
+    # remove the low-frequency noise
+    x = cleaninglownoise(x, fs, f0floor)
+
+    # ---- F0 extraction based on a fixed-point method via filterbank
+    f0v, vrv, dfv, aav, frame_step = fixpF0VexMltpBG4(
         x,
-        fs,
-        f0floor,
-        nvc,
-        nvo,
+        Fxx / fs,
         prm["IFWindowStretch"],
-        prm["F0frameUpdateInterval"],
+        round(prm["F0frameUpdateInterval"] * fs),
         prm["IFsmoothingLengthRelToFc"],
-        prm["IFminimumSmoothingLength"],
+        round(prm["IFminimumSmoothingLength"] * 1e-3 * fs),
         prm["IFexponentForNonlinearSum"],
         prm["IFnumberOfHarmonicForInitialEstimate"],
-        prm["DisplayPlots"],
     )
-    # if imageOn
-    #     title([fname '  ' datestr(now,0)])
-    #     drawnow
 
     # ---- post processing for V/UV decision and F0 tracking
-    pwt, pwh = zplotcpower(x, fs, prm["F0frameUpdateInterval"], prm["DisplayPlots"])
+    pwt, pwh = zplotcpower(x, fs, frame_step)
 
     # paramaters for F0 refinement
     # fftlf0r =   # fftlf0r=1024 # FFT length for F0 refinement
@@ -118,7 +115,7 @@ def straight_pitch(
     # ]  # frame update interval for periodicity index (ms)
 
     f0raw, irms, *_ = f0track5(
-        f0v, vrv, dfv, pwt, pwh, aav, prm["F0frameUpdateInterval"], prm["DisplayPlots"]
+        f0v, vrv, dfv, pwt, pwh, aav, frame_step / fs, prm["DisplayPlots"]
     )  # 11/Sept./2005
     f0t = f0raw
     f0t[f0t == 0] = np.nan
@@ -149,7 +146,7 @@ def straight_pitch(
         prm["refineFftLength"],
         prm["refineTimeStretchingFactor"],
         prm["refineNumberofHarmonicComponent"],
-        prm["F0frameUpdateInterval"],
+        frame_step,
         nstp,
         nedp,
         prm["DisplayPlots"],
@@ -230,7 +227,7 @@ def straight_pitch(
 
 
 ###---- internal functions
-def zplotcpower(x, fs, shiftm, imageOn):
+def zplotcpower(x: NDArray, fs: float, shiftm: int):
 
     flm = 8  # 01/August/1999
     fl = round(flm * fs / 1000)
@@ -252,7 +249,7 @@ def zplotcpower(x, fs, shiftm, imageOn):
     pw = sps.lfilter(w, 1, tx**2)  # fftfilt(w,tx**2)
     pw = pw[fl : nn + fl]
     mpw = np.max(pw)
-    pw = pw[np.round(np.arange(0, nn, shiftm * fs / 1000)).astype(int)]
+    pw = pw[np.round(np.arange(0, nn, shiftm)).astype(int)]
     pw[pw < mpw / 10000000] += mpw / 10000000  # safeguard 15/Jan./2003
 
     b = sps.firwin(2 * fl + 1, [0.0001, 3000 / (fs / 2)])
@@ -262,7 +259,7 @@ def zplotcpower(x, fs, shiftm, imageOn):
     tx = np.pad(xh, (0, 10 * len(w)))
     pwh = sps.lfilter(w, 1, tx**2)  # fftfilt(w,tx**2)
     pwh = pwh[fl : nn + fl]
-    pwh = pwh[np.round(np.arange(0, nn, shiftm * fs / 1000)).astype(int)]
+    pwh = pwh[np.round(np.arange(0, nn, shiftm)).astype(int)]
     pwh[pwh < mpw / 10000000] += mpw / 10000000
     # safeguard 15/Jan./2003
 

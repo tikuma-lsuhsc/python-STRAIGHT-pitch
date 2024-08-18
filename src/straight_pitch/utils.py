@@ -33,7 +33,8 @@ def fftfilt(
         filtering is applied along the specified axis.
     n, optional
         FFT length, by default None to choose an FFT length and a data block length that
-        guarantee efficient execution time.
+        guarantee efficient execution time. If nonpositive, it performs the operation in one
+        block.
     axis, optional
         Filtering axis, by default -1 to choose the last axis. This applies to both
         `b` and `x` only if multidimensional.
@@ -70,14 +71,14 @@ def fftfilt(
         # minimize the number of blocks L times the number of flops per FFT (nfft*log nfft)
         nfft_max = next_fast_len(nb + nx - 1, real=is_real)
         if nx > nb:
-            nfft = next_fast_len(2 * nb - 1, real=is_real)
-            L = nb
-            nblks = ceil(nx / L)
-            c = nblks * nfft * floor(log2(nfft))
-            nfft_next = next_fast_len(nfft + 1, real=is_real)
-            while nfft_next <= nfft_max:
-                L_next = nfft - nb + 1
-                nblks_next = ceil(nx / L_next)
+            # increase the number of blocks
+            L = nx
+            nblks = 1
+            nfft = nfft_max
+            c = nblks * nfft * log2(nfft)
+            for nblks_next in range(2, nx):
+                L_next = ceil(nx / nblks_next)
+                nfft_next = next_fast_len(L_next + nb - 1)
                 c_next = nblks_next * nfft_next * log2(nfft_next)
                 if c_next > c:
                     break
@@ -85,10 +86,12 @@ def fftfilt(
                 nfft = nfft_next
                 L = L_next
                 nblks = nblks_next
-                nfft_next = next_fast_len(nfft + 1, real=is_real)
         else:
             nfft = nfft_max
             L = nx
+    elif n <= 0:
+        L = nx
+        nfft = next_fast_len(L + nb - 1)
     else:
         n = max(n, nb)
         nfft = next_fast_len(n)
@@ -98,14 +101,19 @@ def fftfilt(
 
     if L >= nx:
         # single-block op
-        return ifft(fft(b, nfft) * fft(x, nfft))[:nx]
+        out_slice = [slice(None)] * x.ndim
+        out_slice[axis] = slice(0, nx)
+        return ifft(fft(b, nfft) * fft(x, nfft))[*out_slice]
 
     # multiblock op
 
     if nblks is None:
         nblks = ceil(nx / L)
 
-    y = np.zeros_like(x, dtype=x.dtype if is_real or np.iscomplexobj(x) else b.dtype)
+    y_shape = np.maximum(x.shape, b.shape)
+    y_shape[axis] = x.shape[axis]
+
+    y = np.zeros(y_shape, dtype=x.dtype if is_real or np.iscomplexobj(x) else b.dtype)
     out_slice = [slice(None)] * x.ndim
     ifft_slice = [slice(None)] * x.ndim
     in_slice = [slice(None)] * x.ndim
@@ -118,9 +126,7 @@ def fftfilt(
         nout = min(nout_full, nx - ni)
         ifft_slice[axis] = slice(0, nout)
         out_slice[axis] = slice(ni, ni + nout)
-        y[tuple(out_slice)] += ifft(fft(x[tuple(in_slice)], nfft) * fft(b, nfft))[
-            tuple(ifft_slice)
-        ]
+        y[*out_slice] += ifft(fft(x[*in_slice], nfft) * fft(b, nfft))[*ifft_slice]
 
     return y
 

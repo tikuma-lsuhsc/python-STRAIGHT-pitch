@@ -13,7 +13,7 @@ import numpy as np
 from scipy import signal as sps
 
 
-def f0track5(f0v, vrv, dfv, pwt, pwh, aav, shiftm, imgi=1):
+def f0track5(f0v, vrv, dfv, pwt, pwh, aav, shiftm:int, imgi=1):
     """F0 trajectory tracker
 
     [f0,irms,df,amp]=f0track2(f0v,vrv,dfv,shiftm,imgi)
@@ -26,7 +26,7 @@ def f0track5(f0v, vrv, dfv, pwt, pwh, aav, shiftm, imgi=1):
     pwt	: total power
     pwh	: power in higher frequency range
     aav	: amplitude list for fixed points
-    shiftm	: frame update period (ms)
+    shiftm	: frame update period (s)
     imgi	: display indicator, 1: display on (default), 0: off
 
     This is a very primitive and conventional algorithm.
@@ -56,13 +56,13 @@ def f0track5(f0v, vrv, dfv, pwt, pwh, aav, shiftm, imgi=1):
 
     hth = 0.12  # highly confident voiced threshould (updated on 01/August/1999)
     lth = 0.9  # threshold to loose confidence
-    bklm = 100  # back track length for voicing decision
-    lalm = 10  # look ahead length for silence decision
+    bklm = 0.100  # back track length for voicing decision
+    lalm = 0.010  # look ahead length for silence decision
     bkls = bklm / shiftm
     lals = lalm / shiftm
     htr = 10 * np.log10(pwh / pwt)
 
-    thf0j = 0.04 * sqrt(shiftm)  #  4 # of F0 is the limit of jump
+    thf0j = 0.04 * 10**-1.5 * sqrt(shiftm)  #  4 # of F0 is the limit of jump
     f0ref = 0
     htrth = -2.0  # was -3 mod 2002.6.3
 
