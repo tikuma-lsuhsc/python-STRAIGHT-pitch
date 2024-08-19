@@ -13,10 +13,10 @@ import numpy as np
 from scipy import signal as sps
 from scipy.fft import next_fast_len
 
-from .fixpF0VexMltpBG4 import fixpF0VexMltpBG4, cleaninglownoise
+from .fixpF0VexMltpBG4 import fixpF0VexMltpBG4
 from .f0track5 import f0track5
 from .refineF06 import refineF06
-from .utils import decimate
+from .utils import decimate, fftfilt
 
 from matplotlib import pyplot as plt
 
@@ -94,16 +94,17 @@ def straight_pitch(
         prm["IFnumberOfHarmonicForInitialEstimate"],
     )
 
-    plt.plot(f0v*fs,vrv,'.')
+    plt.plot(f0v * fs, vrv, ".")
     plt.show()
 
     # ---- post processing for V/UV decision and F0 tracking
+    flp: float = 125
+    fhp: float = 3000
     pwt, pwh = zplotcpower(x, fs, frame_step)
     htr = 10 * np.log10(pwh / pwt)
 
-    plt.plot(htr,'.-')
+    plt.plot(htr, ".-")
     plt.show()
-
 
     # 11/Sept./2005
     f0raw = f0track5(f0v, vrv, htr, frame_step / fs)
@@ -234,57 +235,65 @@ def straight_pitch(
 
 
 ###---- internal functions
-def zplotcpower(x: NDArray, fs: float, shiftm: int):
 
-    flm = 8  # 01/August/1999
-    fl = round(flm * fs / 1000)
-    w = sps.get_window("hann", 2 * fl + 1)
-    w = w / w.sum()
-    nn = len(x)
 
-    flpm = 40
-    flp = round(flpm * fs / 1000)
-    wlp = sps.firwin(flp * 2, 70 / (fs / 2))
-    wlp[flp] -= 1
+def cleaninglownoise_filter(fs, f0floor, flm=50):
+    flp = round(fs * flm / 1000)
+    wlp = sps.firwin(flp * 2, f0floor / (fs / 2))
+    wlp[flp] = wlp[flp] - 1
     wlp = -wlp
+    return wlp, flp
 
-    tx = np.pad(x, (0, 2 * len(wlp)))
-    ttx = sps.lfilter(wlp, 1, tx)  # fftfilt(wlp,tx)
-    ttx = ttx[flp : nn + flp]
-    tx = np.pad(ttx, (0, 2 * len(w)))
 
-    pw = sps.lfilter(w, 1, tx**2)  # fftfilt(w,tx**2)
-    pw = pw[fl : nn + fl]
-    mpw = np.max(pw)
-    pw = pw[np.round(np.arange(0, nn, shiftm)).astype(int)]
-    pw[pw < mpw / 10000000] += mpw / 10000000  # safeguard 15/Jan./2003
+# #--------------------------------------------
+def cleaninglownoise(x, fs, f0floor, flm=50):
 
-    b = sps.firwin(2 * fl + 1, [0.0001, 3000 / (fs / 2)])
-    b[fl] -= -1
-    xh = sps.lfilter(b, 1, tx)  # fftfilt(b,tx)
-    xh = xh[fl : nn + fl]
-    tx = np.pad(xh, (0, 10 * len(w)))
-    pwh = sps.lfilter(w, 1, tx**2)  # fftfilt(w,tx**2)
-    pwh = pwh[fl : nn + fl]
-    pwh = pwh[np.round(np.arange(0, nn, shiftm)).astype(int)]
-    pwh[pwh < mpw / 10000000] += mpw / 10000000
-    # safeguard 15/Jan./2003
+    wlp, flp = cleaninglownoise_filter(fs, f0floor, flm)
 
-    # if imageOn
-    #     subplot(614)
-    #     tt=1:len(pw)
-    #     hhg=plot(tt*shiftm,10*log10(pw),'b')
-    #     hold on
-    #     plot(tt*shiftm,10*log10(pwh),'r')
-    #     grid on
-    #     hold off
-    #     set(hhg,'LineWidth',2)
-    #     mp=max(10*log10(pw))
-    #     axis([0 max(tt)*shiftm mp-70 mp+5])
-    #     ylabel('level (dB)')
-    #     title('thick line: total power thin line:high fq. power (>3kHz) ')
+    return fftfilt(wlp, np.pad(x, (0, 2 * flp)))[flp:-flp]
 
-    return pw, pwh
+
+def zplotcpower(
+    x: NDArray, flp: float, fhp: float, shiftm: int = 1
+) -> tuple[NDArray, NDArray, NDArray]:
+    """signal power calculator
+
+    Parameters
+    ----------
+    x
+        ac signal
+    flp
+        lowpass filter cutoff in fractional frequency for total power calculation
+    fhp
+        highpass filter cutoff in fractional frequency for highpass power calculation
+    shiftm
+        downsampling factor
+
+    Returns
+    -------
+        htr - pwh/pw
+        pwh - high-frequency power
+        pw  - total power
+    """
+    # lowpass filter to collect power
+    nfl = round(1 / flp)
+    nf = 2 * nfl + 1
+    w = sps.firwin(nf, flp, pass_zero="lowpass", fs=1, window="hann")
+    b = sps.firwin(nf, fhp, pass_zero="highpass", fs=1, window="hann")
+
+    # squaring to get instantaneous power and pad zeros to account for the group delay
+    y = np.pad(x**2, (0, 2 * nfl))
+    pw = fftfilt(w, y)[nfl:-nfl:shiftm]
+
+    xh = fftfilt(b, np.pad(x, (0, 4 * nfl)))
+    pwh = fftfilt(w, xh**2)[2 * nfl : -2 * nfl : shiftm]
+
+    #
+    htr = np.zeros_like(pw)
+    tf = (pw > 0.0) & (pwh > 0.0)
+    htr[tf] = pwh[tf] / pw[tf]
+
+    return htr, pwh, pw
 
 
 ###------

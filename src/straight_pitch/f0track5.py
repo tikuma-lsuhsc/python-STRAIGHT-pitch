@@ -11,7 +11,17 @@ from math import sqrt
 import numpy as np
 
 
-def f0track5(f0v: NDArray, vrv: NDArray, htr: NDArray, shiftm: float) -> NDArray:
+def f0track5(
+    f0v: NDArray,
+    vrv: NDArray,
+    htr: NDArray,
+    thf0j: float = 0.04,  #  f0 change wrt next/prev frame, f0_current/|f0_current-f0_neighbor| < thf0j => voiced
+    hth: float = 0.164, # high-conf threshold on vrv < hth => voiced
+    lth: float = 0.9,  # low-conf threshold on vrv < lth => voiced
+    htrth: float = 0.02,  # threshold on htr  < htrth => voiced
+    bklm: int = 100,  # back track length for voicing decision
+    lalm: int = 10,  # look ahead length for silence decision
+) -> NDArray:
     """F0 trajectory tracker
 
     :param f0v: fixed point frequency vector in normalized frequency (nb_frames x nb_candidates 2D)
@@ -19,7 +29,6 @@ def f0track5(f0v: NDArray, vrv: NDArray, htr: NDArray, shiftm: float) -> NDArray
     :param dfv: fixed point slope vector (nb_frames x nb_candidates 2D)
     :param htr: (power in higher frequency range)/(total power) in dB (nb_frames long 1D)
     :param aav: amplitude list for fixed points (nb_frames x nb_candidates 2D)
-    :param shiftm: frame update period (s)
     :return: sequence of candidate indices per frame (nb_frames-long 1D int array)
     """
     # 	coded by Hideki Kawahara
@@ -32,17 +41,6 @@ def f0track5(f0v: NDArray, vrv: NDArray, htr: NDArray, shiftm: float) -> NDArray
     # 	30/April/2005 modification for Matlab v7.0 compatibility
     # 	10/Aug./2005 modified  by Takahashi on waitbar
     # 	10/Sept./2005 modified by Kawahara on waitbar
-
-    # hth = 0.12**2  # highly confident voiced threshold (updated on 01/August/1999)
-    hth = 0.164
-    lth = 0.9  # threshold to loose confidence
-    bklm = 0.100  # back track length for voicing decision
-    lalm = 0.010  # look ahead length for silence decision
-    bkls = bklm / shiftm
-    lals = lalm / shiftm
-
-    thf0j = 0.04 * 10**-1.5 * sqrt(shiftm)  #  4 # of F0 is the limit of jump
-    htrth = -2.0  # was -3 mod 2002.6.3
 
     # indices of candidates with the lowest noise level
     ixx = np.argmin(vrv, axis=1)

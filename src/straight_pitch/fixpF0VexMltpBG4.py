@@ -545,19 +545,3 @@ def znrmlcf2() -> tuple[float, float]:
     # c2=sum((xx.^2.*dgs).^2)/n*2;
 
     return c1, c2
-
-
-def cleaninglownoise_filter(fs, f0floor, flm=50):
-    flp = round(fs * flm / 1000)
-    wlp = sps.firwin(flp * 2, f0floor / (fs / 2))
-    wlp[flp] = wlp[flp] - 1
-    wlp = -wlp
-    return wlp, flp
-
-
-# #--------------------------------------------
-def cleaninglownoise(x, fs, f0floor, flm=50):
-
-    wlp, flp = cleaninglownoise_filter(fs, f0floor, flm)
-
-    return fftfilt(wlp, np.pad(x, (0, 2 * flp)))[flp:-flp]
