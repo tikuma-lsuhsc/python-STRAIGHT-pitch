@@ -57,7 +57,7 @@ def fixpF0VexMltpBG4(
         av: filterbank output of the candidates' channels
         step: actual frame shift used
 
-        Each is a nb_candidate x nb_frames 2D array. If a frame does not have
+        Each is a nb_frames x nb_candidate 2D array. If a frame does not have
         all nb_candidate candidates, unused elements are filled with NaN's.
     """
     # 	Designed and coded by Hideki Kawahara
@@ -81,13 +81,13 @@ def fixpF0VexMltpBG4(
     dn1 = dn * 3  # for the 1st harmonic analysis
 
     # output downsampling factor so the frames are separated by approximately `shiftm` seconds
-    frame_step = shiftm
-    frame_step = round(frame_step / dn)
+    frame_step = round(shiftm / dn1)
 
     # decimate so the highest pitch presents only one cycle
     xd1 = decimate(x, dn1)
     pm1 = multanalytFineCSPB(xd1, fxx * dn1, mu, 1)
     pm1abs = np.abs(pm1)
+    pif1 = zwvlt2ifq(pm1) / dn1
     mm = pif1.shape[1]  # number of frames
 
     if nc > 1:
@@ -155,8 +155,7 @@ def fixpF0VexMltpBG4(
     # -----
     # Select candidates
 
-    step = round(frame_step / dn1)
-    m = slice(None, None, step)
+    m = slice(None, None, frame_step)
     res = [
         zfixpfreq3(omegaxx.reshape(-1), *args)
         for args in zip(
@@ -172,7 +171,7 @@ def fixpF0VexMltpBG4(
         -1,
     )
 
-    return fixpp / two_pi, fixvv, fixdf, fixav, step * dn1
+    return fixpp.T / two_pi, fixvv.T, fixdf.T, fixav.T, frame_step * dn1
 
 
 # ------------------------------------------------------------------
@@ -517,12 +516,10 @@ def zfixpfreq3(
 
 
 # #--------------------------------------------
-def znrmlcf2():
+def znrmlcf2() -> tuple[float, float]:
     """compute the reciprocal of ca and cb in Eurospeech 1999 Eq. (10)
 
-    :param f: _description_
-    :return: _description_
-
+    :return: 1/ca and 1/cb values
     """
 
     # define the frequency repsonse of a(n arbitrary) "normalized filter" for eq (5)

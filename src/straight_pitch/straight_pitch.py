@@ -74,15 +74,6 @@ def straight_pitch(
     f0floor = prm["F0searchLowerBound"]
     f0ceil = prm["F0searchUpperBound"]
 
-    # default frame length for pitch extraction (ms)
-    framem = prm["F0defaultWindowLength"]
-
-    fftl = 1024  # default FFT length
-    framel = round(framem * fs / 1000)
-
-    if fftl < framel:
-        fftl = next_fast_len(framel)
-
     # nvo # Number of channels in one octave
     nvo = prm["NofChannelsInOctave"]
     nvc = ceil(log2(f0ceil / f0floor) * nvo)  # number of channels
@@ -96,27 +87,26 @@ def straight_pitch(
         x,
         Fxx / fs,
         prm["IFWindowStretch"],
-        round(prm["F0frameUpdateInterval"] * fs),
+        round(prm["F0frameUpdateInterval"] * 1e-3 * fs),
         prm["IFsmoothingLengthRelToFc"],
         round(prm["IFminimumSmoothingLength"] * 1e-3 * fs),
         prm["IFexponentForNonlinearSum"],
         prm["IFnumberOfHarmonicForInitialEstimate"],
     )
 
+    plt.plot(f0v*fs,vrv,'.')
+    plt.show()
+
     # ---- post processing for V/UV decision and F0 tracking
     pwt, pwh = zplotcpower(x, fs, frame_step)
+    htr = 10 * np.log10(pwh / pwt)
 
-    # paramaters for F0 refinement
-    # fftlf0r =   # fftlf0r=1024 # FFT length for F0 refinement
-    # tstretch =   # tstretch=1.1 # time window stretching factor
-    # nhmx =   # nhmx=3 # number of harmonic components for F0 refinement
-    # iPeriodicityInterval = prm[
-    #     "periodicityFrameUpdateInterval"
-    # ]  # frame update interval for periodicity index (ms)
+    plt.plot(htr,'.-')
+    plt.show()
 
-    f0raw, irms, *_ = f0track5(
-        f0v, vrv, dfv, pwt, pwh, aav, frame_step / fs, prm["DisplayPlots"]
-    )  # 11/Sept./2005
+
+    # 11/Sept./2005
+    f0raw = f0track5(f0v, vrv, htr, frame_step / fs)
     f0t = f0raw
     f0t[f0t == 0] = np.nan
 
@@ -136,6 +126,24 @@ def straight_pitch(
     # end
 
     # ---- F0 refinement
+
+    # paramaters for F0 refinement
+    # fftlf0r =   # fftlf0r=1024 # FFT length for F0 refinement
+    # tstretch =   # tstretch=1.1 # time window stretching factor
+    # nhmx =   # nhmx=3 # number of harmonic components for F0 refinement
+    # iPeriodicityInterval = prm[
+    #     "periodicityFrameUpdateInterval"
+    # ]  # frame update interval for periodicity index (ms)
+
+    # default frame length for pitch extraction (ms)
+    framem = prm["F0defaultWindowLength"]
+
+    framel = round(framem * fs / 1000)
+
+    fftl = 1024  # default FFT length
+    if fftl < framel:
+        fftl = next_fast_len(framel)
+
     nstp = 1  # start position of F0 refinement (samples)
     nedp = len(f0raw)  # last position of F0 refinement (samples)
     dn = floor(fs / (f0ceil * 3 * 2))  # fix by H.K. at 28/Jan./2003
@@ -149,7 +157,6 @@ def straight_pitch(
         frame_step,
         nstp,
         nedp,
-        prm["DisplayPlots"],
     )
     # 31/Aug./2004# 11/Sept.2005
 

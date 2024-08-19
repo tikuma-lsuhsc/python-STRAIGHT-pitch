@@ -14,7 +14,7 @@ from scipy import signal as sps
 from scipy.fft import rfft, next_fast_len
 
 
-def refineF06(x, fs, f0raw, fftl, eta, nhmx, shiftm, nl, nu, imgi=1):
+def refineF06(x, fs, f0raw, fftl, eta, nhmx, shiftl, nl, nu):
     """F0 estimation refinement
     [f0r,ecr]=refineF06(x,fs,f0raw,fftl,nhmx,shiftm,nl,nu,imgi)
             x		: input waveform
@@ -23,7 +23,7 @@ def refineF06(x, fs, f0raw, fftl, eta, nhmx, shiftm, nl, nu, imgi=1):
             fftl	: FFT length
             eta		: temporal stretch factor
             nhmx	: highest harmonic number
-            shiftm	: frame shift period (ms)
+            shiftl	: frame shift period (samples)
             nl		: lower frame number
             nu		: uppter frame number
             imgi	: display indicator, 1: display on (default), 0: off
@@ -52,7 +52,7 @@ def refineF06(x, fs, f0raw, fftl, eta, nhmx, shiftm, nl, nu, imgi=1):
     fax = np.arange(fftl) / fftl * fs
     nfr = len(f0i)  # 07/August/1999
 
-    shiftl = shiftm / 1000 * fs
+    shiftm = shiftl / fs
     x = np.pad(x, (fftl, fftl))
 
     tt = (np.arange(fftl) - fftl / 2) / fs
@@ -124,7 +124,7 @@ def refineF06(x, fs, f0raw, fftl, eta, nhmx, shiftm, nl, nu, imgi=1):
     )
     mmp = slp * 0
 
-    [c1, c2] = znrmlcf2(shiftm)
+    [c1, c2] = znrmlcf2(shiftm * 1e3)  # ???
     fxx = (np.arange(fftl / 2 + 1) + 0.5) / fftl * fs * 2 * pi
 
     # --- calculation of relative noise level
@@ -139,7 +139,7 @@ def refineF06(x, fs, f0raw, fftl, eta, nhmx, shiftm, nl, nu, imgi=1):
 
     # --- Temporal smoothing
 
-    sml = round(1.5 * fs / 1000 / 2 / shiftm) * 2 + 1  # 3 ms, and odd number
+    sml = round(1.5 * fs / 2 / shiftm) * 2 + 1  # 3 ms, and odd number
     smb = round((sml - 1) / 2)  # bias due to filtering
 
     # if imgi==1 hpg=waitbar(0,'P/N smoothing') end # 07/Dec./2002 by H.K.#10/Aug./2005
